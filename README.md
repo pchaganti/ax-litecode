@@ -365,6 +365,27 @@ The model wrapped its response in code blocks despite being told not to. LiteCod
 
 ---
 
+## Known Issues
+
+These are confirmed bugs or limitations that have not yet been fixed:
+
+- **Weak models misclassify complex requests** — Models with poor instruction-following (some Llama 2 variants, older Mistral) occasionally output non-JSON from the planner or generate markdown fences in executor output. Use Qwen2.5-Coder or DeepSeek-Coder for best results.
+- **Large binary files in project** — If your project contains large binary files (images, compiled assets) in the same directory, context map generation may be slow. Add them to a `.litecode_ignore` file (future feature) for now.
+- **Sequential task chains > 5 deep** — Very deep dependency chains (task A → B → C → D → E → F) may hit the planner's task limit on some small models. Break the request into smaller steps.
+
+---
+
+## Solved Issues
+
+Bugs that were present and have been fixed:
+
+| Issue | Fixed in | Description |
+|---|---|---|
+| **Questions overwrote files** | `0.1.1` | Asking "how many lines does X have?" caused the executor to write the answer *into* the file instead of printing it. The planner now uses `action_type: "query"` for read-only questions, which routes them through a dedicated answer path that never touches disk. |
+| **Stale map silent misroute** | `0.1.0` | If the user named a file in their request that wasn't in the context map, the planner would silently route the action to the wrong file. The orchestrator now validates that mentioned file paths match the planner's output and throws a clear error if they don't. |
+
+---
+
 ## Contributing
 
 Pull requests welcome. Before opening one:

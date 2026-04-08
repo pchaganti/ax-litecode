@@ -11,7 +11,7 @@ export interface Task {
   id: string;
   file: string;
   action: string;
-  action_type?: "edit" | "create" | "delete";
+  action_type?: "edit" | "create" | "delete" | "query";
   load_sections: { start: number; end: number } | null;
   needs_context_from: string[];
   depends_on: string[];

@@ -11,6 +11,9 @@ import { plan } from "../orchestrator/planner.js";
 import { schedule } from "../orchestrator/scheduler.js";
 import { apply } from "../orchestrator/applier.js";
 import { Display } from "../ui/display.js";
+import { loadFileForEdit } from "../context/loader.js";
+import { buildQueryPrompt } from "../llm/prompts.js";
+import { callLLM } from "../llm/client.js";
 
 const cwd = process.cwd();
 
@@ -125,14 +128,44 @@ async function runPipeline(userRequest: string): Promise<void> {
     return;
   }
 
-  display.taskList(tasks);
+  // ─── Query tasks: answer the question, never touch disk ──────────────────
+  const queryTasks = tasks.filter(t => t.action_type === "query");
+  const editTasks = tasks.filter(t => t.action_type !== "query");
+
+  for (const task of queryTasks) {
+    const absFile = resolve(cwd, task.file);
+    let fileContent: string;
+    try {
+      fileContent = loadFileForEdit(absFile, task.load_sections ?? undefined);
+    } catch {
+      display.warn(`Could not read ${task.file} to answer query.`);
+      continue;
+    }
+    const messages = buildQueryPrompt(task.action, fileContent, task.file);
+    display.startSpinner(`Reading ${task.file}…`);
+    let answer: string;
+    try {
+      answer = await callLLM(messages, config);
+    } catch (err) {
+      display.stopSpinner("Query failed", false);
+      display.error((err as Error).message);
+      continue;
+    }
+    display.stopSpinner("Done");
+    display.blank();
+    display.info(answer);
+  }
+
+  if (editTasks.length === 0) return;
+
+  display.taskList(editTasks);
 
   // Execute
-  const results = await schedule(tasks, cwd, config, display, userRequest);
+  const results = await schedule(editTasks, cwd, config, display, userRequest);
 
   // Apply
   display.blank();
-  await apply(results, tasks, cwd, display);
+  await apply(results, editTasks, cwd, display);
 
   // Summary
   const succeeded = results.filter(r => r.success).length;

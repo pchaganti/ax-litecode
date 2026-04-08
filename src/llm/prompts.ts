@@ -12,13 +12,16 @@ export function buildPlannerPrompt(
         "Output ONLY a valid JSON object in this exact shape: {\"tasks\": [...]}. " +
         "Do NOT return a bare array. Do NOT write code. Do NOT explain. ONLY output the JSON object.\n\n" +
         "Each task must have: id (string), file (string, relative path), action (string), " +
-        "action_type ('edit' | 'create' | 'delete'), " +
+        "action_type ('edit' | 'create' | 'delete' | 'query'), " +
         "load_sections (null or {start,end}), needs_context_from (string[]), depends_on (string[]).\n\n" +
         "Rules:\n" +
         "- One task per file.\n" +
         "- action_type: 'edit' for modifying an existing file, 'create' for a new file, " +
         "'delete' for removing a file from disk. If the user asks to delete/remove a file, you MUST " +
         "use action_type 'delete' — do NOT emit an edit task that empties the file.\n" +
+        "- action_type MUST be 'query' when the user is asking a question about a file (e.g. 'how many lines', " +
+        "'what does X do', 'show me', 'explain', 'list', 'count', 'find') — NOT modifying anything. " +
+        "NEVER use 'edit' for a read-only question. The action field should state the question to answer.\n" +
         "- The 'action' field MUST be a full sentence describing exactly what to change in that file. " +
         "Example: 'Add console.log(\"Loading config\") as the first line inside the loadConfig function body.' " +
         "NEVER use generic words like 'edit', 'update', 'modify', or 'change' alone — always describe the exact change. " +
@@ -77,6 +80,25 @@ export function buildExecutorPrompt(
         fileSection +
         refSection +
         (isNewFile ? "\n\nIMPORTANT: Output ONLY the file content, nothing else." : ""),
+    },
+  ];
+}
+
+export function buildQueryPrompt(
+  question: string,
+  fileContent: string,
+  fileName: string
+): Message[] {
+  return [
+    {
+      role: "system",
+      content:
+        "You are a helpful code assistant. Answer the user's question about the file concisely and accurately. " +
+        "Do NOT output file content or modified code. Just answer the question in plain text.",
+    },
+    {
+      role: "user",
+      content: `File: ${fileName}\n\n${fileContent}\n\nQuestion: ${question}`,
     },
   ];
 }
