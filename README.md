@@ -1,4 +1,4 @@
-# LiteCode v0.2
+# LiteCode v0.3
 
 > The AI coding agent built for the models everyone actually has — free tiers, local models, and 8k context windows.
 
@@ -13,6 +13,7 @@ LiteCode lets you describe a code change in plain English and have an AI execute
 - **Multi-file edits from one instruction** — "rename validateToken to verifyToken everywhere" touches every file that needs changing, in the right order
 - **Never exceeds 8k tokens** — token budget is enforced in code before every single LLM call, not by hoping the model behaves
 - **Runs edits in parallel** — independent file changes happen at the same time; sequential ones wait for their dependencies
+- **`--sequential` mode for local models** — forces one task at a time, eliminating the parallel connection pressure that causes Ollama to drop requests *(new in v0.3)*
 - **Works with any free model** — Groq, OpenRouter, Ollama, LM Studio, Gemini, DeepSeek — all supported out of the box
 - **Context maps are plain Markdown** — readable by humans, cheap on tokens, safe to commit to git
 - **No data leaves your machine** unless you choose a cloud provider — and even then, only the specific files being edited are sent
@@ -227,6 +228,7 @@ litecode
 | `litecode analyze <file>` | Force-generate a detailed line-index for one specific file |
 | `litecode "your request"` | Run one request and exit (shows diff + prompts before each write) |
 | `litecode --yes "your request"` | Same, but applies all changes without prompting |
+| `litecode --sequential "your request"` | Run tasks one at a time — recommended for Ollama and other local models |
 | `litecode` | Start interactive mode (send multiple requests) |
 | `litecode chat` | Same as above |
 
@@ -385,7 +387,11 @@ You referred to a file that doesn't exist yet. If you just created or renamed it
 - Run `litecode analyze src/yourfile.js` to give the agent a better line-level index before editing a large file.
 
 **Ollama drops connections**
-A known Ollama stability issue under rapid sequential calls. Set `"maxParallelExecutors": 1` in `litecode.json`, or switch to a cloud provider for multi-file edits.
+Ollama is single-threaded — parallel LLM calls queue internally and idle connections time out before Ollama dequeues them. Use the `--sequential` flag to force one task at a time:
+```bash
+litecode --sequential "your request"
+```
+Alternatively, set `"maxParallelExecutors": 1` in `litecode.json` to make this permanent for the project.
 
 **Output has markdown fences (triple backticks) in the code**
 The model wrapped its response in code blocks despite being told not to. LiteCode strips these automatically, but if it still happens, try a model with stronger instruction-following (Qwen2.5-Coder or DeepSeek-Coder).
@@ -408,6 +414,7 @@ Bugs that were present and have been fixed:
 
 | Issue | Fixed in | Description |
 |---|---|---|
+| **Ollama connection drops on multi-file edits** | `0.3.0` | When a task wave had 3+ independent files, LiteCode fired all LLM calls simultaneously. Ollama queues these internally and idle connections timed out before being served, causing network errors and retries. The new `--sequential` flag (`-s`) overrides `maxParallelExecutors` to 1 for that run, eliminating parallel pressure without changing any config file. |
 | **No visibility into AI changes** | `0.2.0` | Changes were applied directly to disk with no way to preview them. LiteCode now shows a colored unified diff (red for removed lines, green for added) for every file before writing, and prompts `[y]es / [n]o / [a]ll / [q]uit`. Use `--yes` to restore the old no-prompt behavior. |
 | **Questions overwrote files** | `0.1.1` | Asking "how many lines does X have?" caused the executor to write the answer *into* the file instead of printing it. The planner now uses `action_type: "query"` for read-only questions, which routes them through a dedicated answer path that never touches disk. |
 | **Stale map silent misroute** | `0.1.0` | If the user named a file in their request that wasn't in the context map, the planner would silently route the action to the wrong file. The orchestrator now validates that mentioned file paths match the planner's output and throws a clear error if they don't. |

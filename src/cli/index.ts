@@ -22,7 +22,8 @@ program
   .description("CLI coding agent for 8k-context LLMs")
   .version("0.2.0")
   .option("-v, --verbose", "Show token counts and debug info")
-  .option("-y, --yes", "Apply all changes without confirmation");
+  .option("-y, --yes", "Apply all changes without confirmation")
+  .option("-s, --sequential", "Run tasks one at a time — recommended for local models like Ollama");
 
 // ─── litecode connect ─────────────────────────────────────────────────────────
 
@@ -162,11 +163,12 @@ async function runPipeline(userRequest: string): Promise<void> {
   display.taskList(editTasks);
 
   // Execute
+  const opts = program.opts();
+  if (opts.sequential) config.maxParallelExecutors = 1;
   const results = await schedule(editTasks, cwd, config, display, userRequest);
 
   // Apply
   display.blank();
-  const opts = program.opts();
   await apply(results, editTasks, cwd, display, { yes: opts.yes ?? false });
 
   // Summary
