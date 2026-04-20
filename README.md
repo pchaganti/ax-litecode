@@ -1,4 +1,4 @@
-# LiteCode v0.3
+# LiteCode v0.4
 
 > The AI coding agent built for the models everyone actually has — free tiers, local models, and 8k context windows.
 
@@ -13,7 +13,8 @@ LiteCode lets you describe a code change in plain English and have an AI execute
 - **Multi-file edits from one instruction** — "rename validateToken to verifyToken everywhere" touches every file that needs changing, in the right order
 - **Never exceeds 8k tokens** — token budget is enforced in code before every single LLM call, not by hoping the model behaves
 - **Runs edits in parallel** — independent file changes happen at the same time; sequential ones wait for their dependencies
-- **`--sequential` mode for local models** — forces one task at a time, eliminating the parallel connection pressure that causes Ollama to drop requests *(new in v0.3)*
+- **Auto-sequential for local models** — when the configured provider is on `localhost`, executors run one at a time automatically, eliminating the parallel connection pressure that causes Ollama to drop requests. Use `--parallel` to override. *(new in v0.4)*
+- **Interactive TUI with scroll + mouse wheel** — persistent chat session, live token sidebar, scrollable history (arrows, PgUp/PgDn, mouse wheel), diff viewer. Run `litecode` with no arguments, or use `--ansi` for the plain terminal mode. *(new in v0.4)*
 - **Works with any free model** — Groq, OpenRouter, Ollama, LM Studio, Gemini, DeepSeek — all supported out of the box
 - **Context maps are plain Markdown** — readable by humans, cheap on tokens, safe to commit to git
 - **No data leaves your machine** unless you choose a cloud provider — and even then, only the specific files being edited are sent
@@ -228,9 +229,12 @@ litecode
 | `litecode analyze <file>` | Force-generate a detailed line-index for one specific file |
 | `litecode "your request"` | Run one request and exit (shows diff + prompts before each write) |
 | `litecode --yes "your request"` | Same, but applies all changes without prompting |
-| `litecode --sequential "your request"` | Run tasks one at a time — recommended for Ollama and other local models |
-| `litecode` | Start interactive mode (send multiple requests) |
-| `litecode chat` | Same as above |
+| `litecode --sequential "your request"` | Force tasks to run one at a time (default for local providers) |
+| `litecode --parallel "your request"` | Force parallel execution even for local providers |
+| `litecode --verbose "your request"` | Print the chosen executor mode and token counts |
+| `litecode` | Start the interactive TUI (persistent chat, scroll, sidebar) |
+| `litecode --ansi` | Start the plain-terminal interactive mode (no TUI) |
+| `litecode chat` | Same as `litecode` |
 
 ---
 
@@ -387,11 +391,7 @@ You referred to a file that doesn't exist yet. If you just created or renamed it
 - Run `litecode analyze src/yourfile.js` to give the agent a better line-level index before editing a large file.
 
 **Ollama drops connections**
-Ollama is single-threaded — parallel LLM calls queue internally and idle connections time out before Ollama dequeues them. Use the `--sequential` flag to force one task at a time:
-```bash
-litecode --sequential "your request"
-```
-Alternatively, set `"maxParallelExecutors": 1` in `litecode.json` to make this permanent for the project.
+Ollama is single-threaded — parallel LLM calls queue internally and idle connections time out before Ollama dequeues them. As of v0.4, LiteCode detects local providers (any `localhost` / `127.0.0.1` base URL) and runs tasks sequentially by default, so you shouldn't hit this anymore. If you explicitly want parallel execution on a local model, pass `--parallel`. To force sequential on a cloud provider, pass `--sequential`.
 
 **Output has markdown fences (triple backticks) in the code**
 The model wrapped its response in code blocks despite being told not to. LiteCode strips these automatically, but if it still happens, try a model with stronger instruction-following (Qwen2.5-Coder or DeepSeek-Coder).
@@ -414,6 +414,8 @@ Bugs that were present and have been fixed:
 
 | Issue | Fixed in | Description |
 |---|---|---|
+| **Users had to remember `--sequential` for every local-model run** | `0.4.0` | LiteCode now inspects `provider.baseURL` at run time; any `localhost` / `127.0.0.1` / `0.0.0.0` / `::1` host defaults to `maxParallelExecutors=1`. Cloud providers still run in parallel by default. A new `--parallel` flag restores parallel execution when explicitly requested on a local model. |
+| **TUI flicker and missing scroll** | `0.4.0` | The Ink-based TUI repainted the entire frame on every state update, causing visible flicker when typing or during spinner animation. Memoized child components, isolated the spinner into a leaf component, fixed the fullscreen height off-by-one (ink#450), and added row-budgeted message windowing so long answers no longer overflow the input bar. Added keyboard scrolling (arrows, PgUp/PgDn, `g`/`G`) and xterm SGR mouse wheel support. |
 | **Ollama connection drops on multi-file edits** | `0.3.0` | When a task wave had 3+ independent files, LiteCode fired all LLM calls simultaneously. Ollama queues these internally and idle connections timed out before being served, causing network errors and retries. The new `--sequential` flag (`-s`) overrides `maxParallelExecutors` to 1 for that run, eliminating parallel pressure without changing any config file. |
 | **No visibility into AI changes** | `0.2.0` | Changes were applied directly to disk with no way to preview them. LiteCode now shows a colored unified diff (red for removed lines, green for added) for every file before writing, and prompts `[y]es / [n]o / [a]ll / [q]uit`. Use `--yes` to restore the old no-prompt behavior. |
 | **Questions overwrote files** | `0.1.1` | Asking "how many lines does X have?" caused the executor to write the answer *into* the file instead of printing it. The planner now uses `action_type: "query"` for read-only questions, which routes them through a dedicated answer path that never touches disk. |
