@@ -3,6 +3,7 @@ import type { Config } from "../config/config.js";
 import { callLLM, type LLMUsage } from "../llm/client.js";
 import { buildExecutorPrompt } from "../llm/prompts.js";
 import { canFit } from "../tokens/budget.js";
+import { countTokens } from "../tokens/counter.js";
 import { loadFileForEdit } from "../context/loader.js";
 import type { Task } from "./planner.js";
 import type { Display } from "../ui/display.js";
@@ -17,7 +18,8 @@ export async function execute(
   projectRoot: string,
   config: Config,
   display?: Display,
-  originalRequest = ""
+  originalRequest = "",
+  memoryText = ""
 ): Promise<ExecuteResult> {
   const absFile = resolve(projectRoot, task.file);
 
@@ -66,7 +68,13 @@ export async function execute(
 
   display?.taskStart(task.id, task.file, budget.totalTokens);
 
-  const messages = buildExecutorPrompt(task.action, fileContent, referenceFiles, isNewFile, task.file, originalRequest);
+  // Only inject memory if it fits within the remaining token budget, so it never
+  // causes context overflow on small models.
+  const activeMemory = memoryText && countTokens(memoryText) <= budget.remaining
+    ? memoryText
+    : "";
+
+  const messages = buildExecutorPrompt(task.action, fileContent, referenceFiles, isNewFile, task.file, originalRequest, activeMemory);
   const result = await callLLM(messages, config);
   display?.onUsage?.(result.usage);
   return result;

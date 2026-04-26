@@ -41,7 +41,8 @@ async function runBatch(
   projectRoot: string,
   config: Config,
   display?: Display,
-  originalRequest = ""
+  originalRequest = "",
+  memoryText = ""
 ): Promise<ExecutionResult[]> {
   const limit = config.maxParallelExecutors;
   const results: ExecutionResult[] = [];
@@ -53,7 +54,7 @@ async function runBatch(
       batch.map(task =>
         task.action_type === "delete"
           ? Promise.resolve("")
-          : execute(task, projectRoot, config, display, originalRequest)
+          : execute(task, projectRoot, config, display, originalRequest, memoryText)
       )
     );
 
@@ -73,9 +74,10 @@ async function runBatch(
       }
     }
 
-    // Delay between batches to avoid rate limits (e.g., Groq = 20 req/min)
+    // Use configured delay between batches; fall back to 3 s if unset
     if (i + limit < tasks.length) {
-      await new Promise(r => setTimeout(r, 3000));
+      const delay = config.rateLimitDelayMs ?? 3000;
+      await new Promise(r => setTimeout(r, delay));
     }
   }
 
@@ -87,7 +89,8 @@ export async function schedule(
   projectRoot: string,
   config: Config,
   display?: Display,
-  originalRequest = ""
+  originalRequest = "",
+  memoryText = ""
 ): Promise<ExecutionResult[]> {
   const waves = buildWaves(tasks);
   const allResults: ExecutionResult[] = [];
@@ -97,7 +100,7 @@ export async function schedule(
   for (let wi = 0; wi < waves.length; wi++) {
     const wave = waves[wi];
     display?.wave(wi + 1, waves.length, wave.map(t => t.file));
-    const waveResults = await runBatch(wave, projectRoot, config, display, originalRequest);
+    const waveResults = await runBatch(wave, projectRoot, config, display, originalRequest, memoryText);
     allResults.push(...waveResults);
   }
 

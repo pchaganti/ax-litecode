@@ -49,7 +49,8 @@ export function buildExecutorPrompt(
   referenceFiles: { name: string; content: string }[],
   isNewFile = false,
   fileName = "",
-  originalRequest = ""
+  originalRequest = "",
+  memoryText = ""
 ): Message[] {
   const refSection =
     referenceFiles.length > 0
@@ -63,15 +64,17 @@ export function buildExecutorPrompt(
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
   const fileTypeHint = ext ? `FILE TYPE: ${ext.toUpperCase()}\n` : '';
 
+  const memoryBlock = memoryText ? `${memoryText}\n\n` : "";
+
   const fileSection = isNewFile
     ? `--- Create new file: ${fileName} ---\n(create this file from scratch)`
     : `--- File to edit: ${fileName} ---\n${fileContent}`;
 
   const systemPrompt = isNewFile
-    ? `You are a code generator. ${fileTypeHint}Create a complete new file from scratch matching the requested file type. ` +
+    ? `${memoryBlock}You are a code generator. ${fileTypeHint}Create a complete new file from scratch matching the requested file type. ` +
       "Output ONLY the complete file content. " +
       "No markdown fences. No explanations. No commentary. Just the code."
-    : `You are a code editor. Output ONLY the complete modified file content. ` +
+    : `${memoryBlock}You are a code editor. Output ONLY the complete modified file content. ` +
       "No markdown fences. No explanations. No commentary. Just the code.";
 
   return [

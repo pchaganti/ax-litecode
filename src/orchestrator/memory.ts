@@ -14,7 +14,7 @@ interface MemoryFile {
 
 const MEMORY_DIR = ".litecode";
 const MEMORY_FILE = "memory.json";
-const MAX_ENTRIES = 2;
+const MAX_ENTRIES = 4;
 
 function memoryPath(cwd: string): { dir: string; file: string } {
   const dir = join(cwd, MEMORY_DIR);

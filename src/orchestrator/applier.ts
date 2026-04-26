@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import type { Task } from "./planner.js";
 import type { ExecutionResult } from "./scheduler.js";
@@ -38,16 +38,40 @@ export async function apply(
   const skipConfirm = options?.yes ?? false;
   const applied: string[] = [];
 
-  // Pre-pass: capture all original file contents before any writes
-  const originals = new Map<string, string>();
+  // Pre-pass: capture all original file contents before any writes.
+  // These serve as both the diff base and rollback data.
+  const originals = new Map<string, string | null>(); // null = file did not exist
   for (const result of results) {
     const task = taskMap.get(result.taskId);
     if (!task) continue;
     const absFile = resolve(projectRoot, task.file);
-    originals.set(absFile, existsSync(absFile) ? readFileSync(absFile, "utf-8") : "");
+    originals.set(absFile, existsSync(absFile) ? readFileSync(absFile, "utf-8") : null);
   }
 
+  // Rollback: maps absFile → original content (null = delete the file on rollback)
+  const rollback = new Map<string, string | null>();
+
   let acceptAll = false;
+
+  const doRollback = (failedFile: string) => {
+    const rolled: string[] = [];
+    for (const [absFile, content] of rollback) {
+      try {
+        if (content === null) {
+          if (existsSync(absFile)) unlinkSync(absFile);
+        } else {
+          mkdirSync(dirname(absFile), { recursive: true });
+          writeFileSync(absFile, content, "utf-8");
+        }
+        rolled.push(absFile);
+      } catch {
+        // best-effort
+      }
+    }
+    if (rolled.length > 0) {
+      display?.warn(`Write failed for ${failedFile} — rolled back ${rolled.length} already-written file(s).`);
+    }
+  };
 
   for (const result of results) {
     const task = taskMap.get(result.taskId);
@@ -58,7 +82,19 @@ export async function apply(
     }
 
     const absFile = resolve(projectRoot, task.file);
-    const originalContent = originals.get(absFile) ?? "";
+    const capturedOriginal = originals.get(absFile);
+    const originalContent = capturedOriginal ?? "";
+
+    // Conflict detection: if the file changed on disk since we captured originals, warn.
+    if (capturedOriginal !== null && existsSync(absFile)) {
+      const currentContent = readFileSync(absFile, "utf-8");
+      if (currentContent !== capturedOriginal) {
+        display?.warn(
+          `${task.file}: file changed on disk during execution — skipping to avoid overwriting external changes.`
+        );
+        continue;
+      }
+    }
 
     // Handle delete tasks (no LLM content involved)
     if (task.action_type === "delete") {
@@ -79,6 +115,7 @@ export async function apply(
       }
       try {
         if (existsSync(absFile)) {
+          rollback.set(absFile, capturedOriginal ?? null);
           unlinkSync(absFile);
           display?.fileWrite(task.file, "deleted");
           applied.push(task.file);
@@ -86,6 +123,7 @@ export async function apply(
           display?.warn(`${task.file}: already absent — nothing to delete`);
         }
       } catch (err) {
+        doRollback(task.file);
         display?.fileFail(task.file, (err as Error).message);
       }
       continue;
@@ -124,9 +162,14 @@ export async function apply(
         if (choice === "no") { display.warn(`Skipped ${task.file}`); continue; }
       }
 
-      // Write
+      // Atomic write: write to a .tmp file first, then rename into place.
+      // This prevents partial writes if the process is interrupted mid-write.
+      const tmpFile = absFile + ".litecode.tmp";
       mkdirSync(dirname(absFile), { recursive: true });
-      writeFileSync(absFile, finalContent, "utf-8");
+      writeFileSync(tmpFile, finalContent, "utf-8");
+      rollback.set(absFile, capturedOriginal ?? null); // record before rename so rollback covers this file
+      renameSync(tmpFile, absFile);
+
       applied.push(task.file);
       if (task.load_sections) {
         display?.fileWrite(task.file, `lines ${task.load_sections.start}–${task.load_sections.end}`);
@@ -134,6 +177,7 @@ export async function apply(
         display?.fileWrite(task.file);
       }
     } catch (err) {
+      doRollback(task.file);
       display?.fileFail(task.file, (err as Error).message);
     }
   }

@@ -10,7 +10,7 @@ import { analyzeFile } from "../context/analyzer.js";
 import { plan } from "../orchestrator/planner.js";
 import { schedule } from "../orchestrator/scheduler.js";
 import { apply } from "../orchestrator/applier.js";
-import { appendMemory } from "../orchestrator/memory.js";
+import { appendMemory, loadMemory, formatMemoryForPrompt } from "../orchestrator/memory.js";
 import { Display } from "../ui/display.js";
 import { loadFileForEdit } from "../context/loader.js";
 import { buildQueryPrompt } from "../llm/prompts.js";
@@ -38,7 +38,7 @@ function shouldRunSequential(baseURL: string | undefined): boolean {
 program
   .name("litecode")
   .description("CLI coding agent for 8k-context LLMs")
-  .version("1.0.0")
+  .version("1.1.0")
   .option("-v, --verbose", "Show token counts and debug info")
   .option("-y, --yes", "Apply all changes without confirmation")
   .option("-s, --sequential", "Run tasks one at a time (default for local models)")
@@ -190,7 +190,8 @@ async function runPipelineWithDisplay(
   if (opts.verbose) {
     display.info(`Executor mode: ${config.maxParallelExecutors === 1 ? "sequential" : `parallel (max ${config.maxParallelExecutors})`}`);
   }
-  const results = await schedule(editTasks, cwd, config, display as Display, userRequest);
+  const memoryText = formatMemoryForPrompt(loadMemory(cwd));
+  const results = await schedule(editTasks, cwd, config, display as Display, userRequest, memoryText);
 
   display.blank();
   const appliedFiles = await apply(results, editTasks, cwd, display as Display, { yes: opts.yes ?? false });

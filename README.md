@@ -1,4 +1,4 @@
-# LiteCode v1.0
+# LiteCode v1.1
 
 > The AI coding agent built for the models everyone actually has — free tiers, local models, and 8k context windows.
 
@@ -13,7 +13,7 @@ LiteCode lets you describe a code change in plain English and have an AI execute
 - **Multi-file edits from one instruction** — "rename validateToken to verifyToken everywhere" touches every file that needs changing, in the right order
 - **Never exceeds 8k tokens** — token budget is enforced in code before every single LLM call, not by hoping the model behaves
 - **Runs edits in parallel** — independent file changes happen at the same time; sequential ones wait for their dependencies
-- **Short-term memory** — LiteCode remembers the last 2 things it did in your project. Say "undo the last change" or "also add a goodbye() function" and it knows exactly what you mean *(new in v1.0)*
+- **Short-term memory** — LiteCode remembers the last 4 things it did in your project. Say "undo the last change" or "also add a goodbye() function" and it knows exactly what you mean. Memory is now passed to both the planner and executor *(expanded in v1.1)*
 - **Auto-sequential for local models** — when the configured provider is on `localhost`, executors run one at a time automatically, eliminating the parallel connection pressure that causes Ollama to drop requests
 - **Interactive TUI with scroll + mouse wheel** — persistent chat session, live token sidebar, scrollable history, diff viewer. Run `litecode` with no arguments, or use `--ansi` for the plain terminal mode
 - **Works with any free model** — Groq, OpenRouter, Ollama, LM Studio, Gemini, DeepSeek — all supported out of the box
@@ -24,7 +24,7 @@ LiteCode lets you describe a code change in plain English and have an AI execute
 
 ## Short-Term Memory
 
-As of v1.0, LiteCode remembers the last 2 actions it performed in each project. This memory is stored in `.litecode/memory.json` inside your project and is injected into the planner's prompt on every request so the AI can reason about what it previously did.
+As of v1.1, LiteCode remembers the last 4 actions it performed in each project. This memory is stored in `.litecode/memory.json` inside your project and is injected into both the planner's and executor's prompts on every request so the AI can reason about what it previously did.
 
 **What this enables:**
 
@@ -43,10 +43,10 @@ litecode "also add a goodbye() function"
 
 1. After the planner produces a task list, it also outputs a one-sentence `synthesis` describing what the plan will do (e.g. `"Added a hello() function in utils.js"`).
 2. After at least one file is successfully written to disk, LiteCode saves an entry with the user's original request, the synthesis, the files that were written, and a timestamp.
-3. The memory is a **ring buffer of 2** — the oldest entry is evicted when a third is added. This keeps the token cost negligible (~80–90 tokens per entry).
-4. On every subsequent request, the memory block is prepended to the planner's system prompt so it can reason about "last time", "undo", "revert", "previous", etc.
+3. The memory is a **ring buffer of 4** — the oldest entry is evicted when a fifth is added. This keeps the token cost negligible (~80–90 tokens per entry).
+4. On every subsequent request, the memory block is prepended to both the planner's and executor's system prompts so both the planning and editing stages can reason about "last time", "undo", "revert", "previous", etc. The executor only injects memory when it fits within the remaining token budget.
 
-**Token cost:** ~80–90 tokens per entry. The budget check (`canFit`) accounts for memory — if the project context is very large, folder context is dropped first, then memory, to ensure the planner always fits within your configured token limit.
+**Token cost:** ~80–90 tokens per entry (~320–360 tokens for a full buffer of 4). The budget check (`canFit`) accounts for memory — if the project context is very large, folder context is dropped first, then memory, to ensure the planner always fits within your configured token limit. The executor guards memory injection independently with the same logic.
 
 **Storage:** `.litecode/memory.json` — per-project, not global. You can add `.litecode/` to your `.gitignore` if you don't want it committed.
 
@@ -81,7 +81,7 @@ You: "rename the login function to authenticate everywhere"
 │  PLANNER (1 AI call)        │
 │                             │
 │  Reads your project map     │
-│  + last 2 memory entries.   │
+│  + last 4 memory entries.   │
 │  Figures out which files    │
 │  need to change and in      │
 │  what order.                │
@@ -158,9 +158,9 @@ Total context window:           8192 tokens
 ─────────────────────────────────────────────
 System prompt + instructions:  ~1000 tokens
 Reserved for AI response:      ~2000 tokens
-Memory (up to 2 entries):       ~180 tokens
+Memory (up to 4 entries):       ~360 tokens
 ─────────────────────────────────────────────
-Available for your code:       ~5000 tokens  (≈ 150–200 lines)
+Available for your code:       ~4800 tokens  (≈ 140–190 lines)
 ```
 
 The token counter runs **before every LLM call**. If the code doesn't fit, LiteCode automatically falls back to loading just the relevant section using the file's analysis index. This check never gets skipped.
@@ -305,7 +305,7 @@ LiteCode works best with specific, concrete instructions:
 
 You don't need to name files if you don't know them — the Planner reads your project map and figures it out. But the more specific you are, the better the result.
 
-**Memory-aware requests** (v1.0+):
+**Memory-aware requests** (v1.0+, expanded in v1.1):
 
 | Request | What LiteCode does |
 |---|---|
@@ -402,7 +402,7 @@ litecode/
 │   │   ├── executor.ts       # Sends one file + one task to LLM → gets edited content
 │   │   ├── scheduler.ts      # Builds dependency graph, runs waves in parallel
 │   │   ├── applier.ts        # Writes LLM output to disk (or deletes files), returns applied paths
-│   │   └── memory.ts         # loadMemory / appendMemory / formatMemoryForPrompt (ring buffer of 2)
+│   │   └── memory.ts         # loadMemory / appendMemory / formatMemoryForPrompt (ring buffer of 4)
 │   │
 │   ├── context/
 │   │   ├── mapper.ts         # Generates project_context.md and folder_context.md
@@ -435,8 +435,11 @@ litecode/
 - The orchestrator never calls the LLM directly — only through `planner.ts` or `executor.ts`.
 - One executor = one file. Never two files in a single call.
 - Context maps are plain Markdown — readable by humans, cheap on tokens.
-- If one executor fails, the rest continue. Nothing crashes the whole run.
+- If one executor fails, the rest continue. Nothing crashes the whole run. Any files already written are rolled back to their original content.
+- File writes are atomic: content is written to a `.litecode.tmp` file first, then renamed into place. A crash mid-write never leaves a partial file.
+- Before writing a file, LiteCode re-reads it from disk. If it changed since execution started, the write is skipped to avoid overwriting external edits.
 - Memory is written only after at least one file is actually applied to disk — failed or skipped runs don't pollute history.
+- Memory is injected into both the planner and executor prompts. The executor only includes it when it fits within the remaining token budget.
 - No streaming. Full responses only — simpler and more reliable with small models.
 
 ---
@@ -447,7 +450,7 @@ When you run LiteCode in a project, it creates a `.litecode/` folder:
 
 ```
 .litecode/
-└── memory.json    ← Ring buffer of last 2 completed actions
+└── memory.json    ← Ring buffer of last 4 completed actions
 ```
 
 You can safely add this to `.gitignore` if you don't want it committed:
@@ -477,7 +480,7 @@ The project context maps are missing or empty. Run `litecode init --fast` first.
 You referred to a file that doesn't exist yet. If you just created or renamed it, run `litecode init --fast` to refresh the maps, then retry.
 
 **"Undo" doesn't target the right file**
-Memory stores the last 2 completed runs. If more than 2 runs have passed since the change you want to undo, memory won't have it — name the file explicitly instead: `"remove the hello() function from utils.js"`.
+Memory stores the last 4 completed runs. If more than 4 runs have passed since the change you want to undo, memory won't have it — name the file explicitly instead: `"remove the hello() function from utils.js"`.
 
 **Edits are wrong or incomplete**
 - Be more specific in your request (name the function, describe the exact change).
@@ -500,6 +503,16 @@ The model wrapped its response in code blocks despite being told not to. LiteCod
 ---
 
 ## Changelog
+
+### v1.1.0
+
+- **Atomic file writes** — Each file is written to a `.litecode.tmp` file first, then renamed into place. A crash or interruption mid-write can never leave a partial or corrupted file on disk.
+- **Conflict detection** — Before applying any edit, LiteCode re-reads the file from disk. If it changed since execution started (external editor, another process), the write is skipped with a warning rather than silently overwriting the change.
+- **Rollback on failure** — If a write fails partway through a multi-file run, all files already written in that batch are automatically restored to their original content.
+- **Deeper memory — 4 entries (was 2)** — The short-term memory ring buffer now holds the last 4 completed actions instead of 2, giving the AI more context for follow-up requests and "undo" operations.
+- **Memory reaches the executor** — Previously memory was only injected into the planner prompt. Now the executor (the component that actually edits each file) also receives memory context, so it can apply changes with full awareness of recent history. Memory is only injected when it fits within the remaining token budget.
+- **Accurate token counting fallback** — When tiktoken fails to initialize, the character-based fallback now uses a ratio of 4.0 chars/token (was 3.5), which is more accurate for source code. A warning is printed to stderr so the fallback is never silent.
+- **Rate limit delay respects config** — The inter-batch pause now reads `config.rateLimitDelayMs` (was hardcoded to 3000ms). Set it in `litecode.json` to tune for your provider.
 
 ### v1.0.0
 
