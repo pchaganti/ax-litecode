@@ -4,7 +4,7 @@
 
 LiteCode lets you describe a code change in plain English and have an AI execute it across your entire project. No paid subscription. No 200k-token model required. Works right now with a free Groq account, a free OpenRouter key, or just Ollama on your laptop.
 
-> **Warning:** LiteCode is experimental software. It shows a diff and asks for confirmation before touching any file — but it may still produce incorrect edits depending on the model you use. **Always commit or back up your work before running it.** The author takes no responsibility for data loss or file corruption. Use at your own risk.
+
 
 ---
 
