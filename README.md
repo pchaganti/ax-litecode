@@ -1,4 +1,4 @@
-# LiteCode v1.1
+# LiteCode
 
 > The AI coding agent built for the models everyone actually has — free tiers, local models, and 8k context windows.
 
