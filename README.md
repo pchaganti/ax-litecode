@@ -1,6 +1,7 @@
 # LiteCode
 
 > The AI coding agent built for the models everyone actually has — free tiers, local models, and 8k context windows.
+![](./litecodegif.gif)
 
 LiteCode lets you describe a code change in plain English and have an AI execute it across your entire project. No paid subscription. No 200k-token model required. Works right now with a free Groq account, a free OpenRouter key, or just Ollama on your laptop.
 
